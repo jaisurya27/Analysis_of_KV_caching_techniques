@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Model weights / HuggingFace cache (can be huge)
+*.bin
+*.safetensors
+*.gguf
+hf_cache/
+
+# Results (kept locally, excluded from git by default to avoid large diffs)
+# Comment out if you want to track results.
+# results/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+wandb/
