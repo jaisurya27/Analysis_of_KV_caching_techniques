@@ -5,7 +5,7 @@ Main evaluation entry point for KV-cache compression experiments.
 Usage examples
 --------------
 # Full-attention baseline (no compression):
-python run_eval.py --method full --model Qwen/Qwen3-8B
+python run_eval.py --method full --model Qwen/Qwen3-1.7B
 
 # H2O with 20% cache budget (10% HH + 10% recent):
 python run_eval.py --method h2o --hh_ratio 0.10 --recent_ratio 0.10
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     # Model
     p.add_argument(
         "--model",
-        default="Qwen/Qwen3-8B",
+        default="Qwen/Qwen3-1.7B",
         help="HuggingFace model ID.",
     )
     p.add_argument(

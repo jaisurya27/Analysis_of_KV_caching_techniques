@@ -2,7 +2,7 @@
 
 Systematic evaluation of **H2O** and **StreamingLLM** KV-cache compression
 on the [LongBench](https://github.com/THUDM/LongBench) benchmark, using
-**Qwen3-8B** as the base model.
+**Qwen3-1.7B** as the base model.
 
 ---
 
@@ -93,7 +93,7 @@ All scripts honour environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `MODEL` | `Qwen/Qwen3-8B` | HuggingFace model ID |
+| `MODEL` | `Qwen/Qwen3-1.7B` | HuggingFace model ID |
 | `MAX_SEQ_LEN` | `4096` | Context window (tokens) |
 | `NUM_SAMPLES` | _(all)_ | Max samples per task |
 | `OUTPUT_DIR` | `results` | Output directory |
@@ -107,7 +107,7 @@ You can also call `run_eval.py` directly with full argument control:
 ```bash
 python run_eval.py \
     --method h2o \
-    --model Qwen/Qwen3-8B \
+    --model Qwen/Qwen3-1.7B \
     --hh_ratio 0.05 --recent_ratio 0.05 \
     --max_seq_len 4096 \
     --tasks narrativeqa hotpotqa gov_report \
@@ -166,4 +166,4 @@ python run_eval.py \
    [arxiv:2308.14508](https://arxiv.org/abs/2308.14508)
 
 4. Qwen Team, *Qwen3 Technical Report*, 2025.
-   [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B)
+   [Qwen/Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B)

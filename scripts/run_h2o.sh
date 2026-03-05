@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-MODEL="${MODEL:-Qwen/Qwen3-8B}"
+MODEL="${MODEL:-Qwen/Qwen3-1.7B}"
 MAX_SEQ_LEN="${MAX_SEQ_LEN:-4096}"
 HH_RATIO="${HH_RATIO:-0.10}"
 RECENT_RATIO="${RECENT_RATIO:-0.10}"

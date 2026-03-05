@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def load_model_and_tokenizer(
-    model_name: str = "Qwen/Qwen3-8B",
+    model_name: str = "Qwen/Qwen3-1.7B",
     attn_implementation: str = "eager",
     device_map: str = "auto",
     torch_dtype: torch.dtype = torch.bfloat16,

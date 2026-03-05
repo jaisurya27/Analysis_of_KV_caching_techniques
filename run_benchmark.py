@@ -9,7 +9,7 @@ Measures:
 
 Usage:
   python run_benchmark.py --method full h2o streaming_llm \
-      --seq_len 1024 2048 4096 --gen_len 128 --model Qwen/Qwen3-8B
+      --seq_len 1024 2048 4096 --gen_len 128 --model Qwen/Qwen3-1.7B
 """
 
 import argparse
@@ -94,7 +94,7 @@ def benchmark_one(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--model", default="Qwen/Qwen3-8B")
+    p.add_argument("--model", default="Qwen/Qwen3-1.7B")
     p.add_argument("--method", nargs="+", default=["full", "h2o", "streaming_llm"])
     p.add_argument("--seq_len", nargs="+", type=int, default=[512, 1024, 2048, 4096])
     p.add_argument("--gen_len", type=int, default=128)
