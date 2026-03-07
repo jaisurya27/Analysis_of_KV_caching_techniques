@@ -1,0 +1,22 @@
+{
+  "dataset": "multifieldqa_en",
+  "method": "streaming_llm",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 21.09,
+  "avg_latency_sec": 4.302,
+  "predictions": [
+    "The most active fan club is called \"Urartu\". \n\nThis can be inferred from the information provided in the given text. Specifically, the passage states: \"The most active fan club is called 'Urartu'. \" This clearly indicates that the most active fan club is called \"Urartu\" .",
+    "Yes, the ISR is necessary for transgene reactivation.",
+    "Low-energy electron diffraction was used to study the quantum dot structures.",
+    "An ICD is a device that monitors the electrical activity of the heart and sends signals to pace makers to stimulate the heart to beat at a normal rate.",
+    "It is important for the sides of the fuselage to be sloped (tumbled home) because it allows the wings to fit properly on the fuselage."
+  ],
+  "individual_scores": [
+    9.3,
+    33.33,
+    0.0,
+    21.62,
+    41.18
+  ]
+}

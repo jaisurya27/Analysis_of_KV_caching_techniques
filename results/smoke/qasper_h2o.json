@@ -1,0 +1,22 @@
+{
+  "dataset": "qasper",
+  "method": "h2o",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 11.05,
+  "avg_latency_sec": 9.01,
+  "predictions": [
+    "The ground truth for fake news is established by analyzing the meta-data of the tweets. The authors focused on collecting a large dataset of over 1 million tweets from the day before the election of Donald Trump's presidency. They then analyzed the meta-data associated with each tweet, including the number of retweets, likes, shares, and the number of URLs included in the tweet. By examining how these factors were distributed among tweets containing fake news versus those that did not, the authors were able to establish a baseline for what constitutes \"fake\" news. Additionally, they looked at the behavior of accounts that spread fake news, and the polarization of the",
+    "The GhostVLAD approach is a pooling method that was originally proposed for face recognition to improve language identification performance for Indian languages. It is inspired by the VLAD (Very Locally Connected) pooling technique, which aggregates local descriptors from different locations within a sliding window to represent a larger region. In the context of language identification, GhostVLAD pools frame-level representations to create a compact and informative feature vector suitable for classification tasks. This method aims to enhance the efficiency and accuracy of language identification by leveraging the strengths of VLAD while adapting it specifically to handle sequential data like spoken language.",
+    "Their model outperforms the state of the art results by 6.8%. \n\nNote: The answer provided assumes that \"state of the art\" refers to the previously mentioned \"previous models that focus on audio features\". If there's a different interpretation of what constitutes 'state of the art', please provide clarification. Also, note that the percentage difference between the scores reported in the paper may differ slightly depending on how you interpret the numbers.",
+    "Additional features include contextualized embeddings, which which are learned during the training process. Contextualized embeddings capture the meaning of words within the sentence rather than just their individual appearance. They help in understanding the full context of a phrase or sentence, making them useful for improving the accuracy of abusive language detection. \n\nContext includes the surrounding sentences and paragraphs, providing a broader perspective beyond just the immediate words being analyzed. It helps in identifying patterns and contexts that might indicate abusive behavior, thus enhancing the ability of the system to recognize and flag potentially harmful language. \n\nThese contextual features complement traditional word-level features and contribute to a more comprehensive analysis of the text",
+    "They looked at multiple Facebook pages across various domains and topics. Specifically, they collected data from \"Fox News,\" \"CNN,\" \"Reuters,\" \"USA Today,\" \"The Washington Post,\" \"The Guardian,\" \"The Independent,\" \"The Daily Mail,\" \"The Telegraph,\" \"The Sun,\" \"The Mirror,\" \"The Daily Star,\" \"The Express,\" \"The Mail Online,\" \"The Daily Beast,\" \"The Hill,\" \"Politico,\" \"The Atlantic,\" \"The New Republic,\" \"The Nation,\" \"The New Yorker,\" \"The New York Times,\" \"The Wall Street Journal,\" \"The Boston Globe,\" \"The Los Angeles"
+  ],
+  "individual_scores": [
+    11.88,
+    5.26,
+    13.7,
+    7.14,
+    17.28
+  ]
+}

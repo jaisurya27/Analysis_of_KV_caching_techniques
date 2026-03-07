@@ -1,0 +1,22 @@
+{
+  "dataset": "hotpotqa",
+  "method": "h2o",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 14.67,
+  "avg_latency_sec": 3.47,
+  "predictions": [
+    "Gates v. Collier",
+    "Michael Redgrave",
+    "Pawtucket",
+    "planet",
+    "On film."
+  ],
+  "individual_scores": [
+    33.33,
+    0.0,
+    0.0,
+    0.0,
+    40.0
+  ]
+}

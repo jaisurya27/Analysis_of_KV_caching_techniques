@@ -1,0 +1,22 @@
+{
+  "dataset": "multifieldqa_en",
+  "method": "full",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 29.99,
+  "avg_latency_sec": 13.187,
+  "predictions": [
+    "The most active group of fans is the South West Ultras fan club, mainly composed of residents from several neighbourhoods within the Malatia-Sebastia District of Yerevan, since the club is a de facto representer of the district. Members of the fan club benefit from events organized by the club and many",
+    "Yes, the ISR is necessary for transgene reactivation.",
+    "Low temperature scanning tunneling microscopy and spectroscopy (STM/STS) was used to resolve bound states with level spacings of the order of 100 meV and larger in energy and space. Additionally, ab-initio calculations based on density functional theory and Green's functions were performed to find out that single (",
+    "An ICD stands for Implantable Cardioverter Defibrillator. It's a device that monitors the electrical activity of the heart and delivers electric shocks to restore normal heart rhythm when needed. \n\nThe purpose of an ICD is to prevent sudden death from potentially fatal arrhythmias such as ventricular tachycard",
+    "It is important for the sides of the fuselage to be sloped (tumbled home) because they are designed to to form a conical shape when they are bent and sloped to form the fuselage box section. This means that the sides need to be sloped to form a conical shape to create the"
+  ],
+  "individual_scores": [
+    20.83,
+    33.33,
+    29.63,
+    25.45,
+    40.68
+  ]
+}

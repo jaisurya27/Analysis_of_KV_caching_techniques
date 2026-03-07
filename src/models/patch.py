@@ -1,9 +1,17 @@
 """
-Model loading and KV-compression method application for Qwen3.
+Model loading and KV-compression patching for Qwen2.5-1.5B-Instruct.
+
+Approach is directly inspired by KVCache-Factory (MIT License):
+  https://github.com/Zefan-Cai/KVCache-Factory
+
+KVCache-Factory's monkeypatch.py replaces each attention module's `forward`
+at the class level.  We do the same per-instance (so multiple models with
+different methods can coexist), storing the constructed budget parameters as
+attributes on the model object.
 
 Supported methods
------------------
-full          – Standard full-attention baseline (no compression).
+─────────────────
+full          – Full-attention baseline, no compression.
 h2o           – Heavy-Hitter Oracle (NeurIPS 2023).
 streaming_llm – Attention Sink + sliding window (ICLR 2024).
 """
@@ -26,33 +34,34 @@ from src.kv_cache.streaming_llm import StreamingLLMCache
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
+
+# ────────────────────────────────────────────────────────────────────────────
 # Model + Tokenizer loading
-# ---------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────
 
 def load_model_and_tokenizer(
-    model_name: str = "Qwen/Qwen3-1.7B",
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
     attn_implementation: str = "eager",
     device_map: str = "auto",
     torch_dtype: torch.dtype = torch.bfloat16,
     load_in_4bit: bool = False,
 ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
-    """Load a Qwen3 (or compatible) causal-LM and its tokenizer.
+    """Load a Qwen2.5 (or compatible Llama-family) causal-LM and tokenizer.
 
     Args:
         model_name:           HuggingFace model ID.
-        attn_implementation:  One of "eager", "sdpa", "flash_attention_2".
-                              H2O requires "eager" to obtain softmax weights.
-        device_map:           Passed to from_pretrained; use "auto" for
-                              multi-GPU or "mps" / "cpu" for Apple Silicon.
-        torch_dtype:          Model weight dtype.
-        load_in_4bit:         Enable BitsAndBytes 4-bit quantization to fit
-                              large models on consumer GPUs.
+        attn_implementation:  "eager" | "sdpa" | "flash_attention_2".
+                              H2O **requires "eager"** to capture softmax weights.
+                              StreamingLLM and full work with any backend.
+        device_map:           "auto" for multi-GPU, "mps" for Apple Silicon,
+                              "cpu" for CPU-only.
+        torch_dtype:          Weight dtype; bfloat16 recommended.
+        load_in_4bit:         BitsAndBytes 4-bit quantisation (CUDA only).
 
     Returns:
-        (model, tokenizer) tuple.
+        (model, tokenizer) — model is in eval mode.
     """
-    logger.info("Loading tokenizer for %s …", model_name)
+    logger.info("Loading tokenizer: %s", model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -67,7 +76,6 @@ def load_model_and_tokenizer(
     if load_in_4bit:
         try:
             from transformers import BitsAndBytesConfig
-
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.bfloat16,
@@ -76,93 +84,86 @@ def load_model_and_tokenizer(
             )
             load_kwargs.pop("torch_dtype", None)
         except ImportError:
-            logger.warning(
-                "bitsandbytes not installed; falling back to full precision."
-            )
+            logger.warning("bitsandbytes not installed; using full precision.")
 
-    logger.info("Loading model %s …", model_name)
+    logger.info("Loading model: %s", model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     model.eval()
-
     return model, tokenizer
 
 
-# ---------------------------------------------------------------------------
-# Method application
-# ---------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────
+# Method application  (mirrors KVCache-Factory's replace_mistral + per-layer
+# config approach, but stored on the model instance rather than globally)
+# ────────────────────────────────────────────────────────────────────────────
 
 def apply_kv_method(
     model: PreTrainedModel,
     method: str,
     *,
-    hh_ratio: float = 0.1,
-    recent_ratio: float = 0.1,
+    hh_ratio: float = 0.10,
+    recent_ratio: float = 0.10,
     sink_size: int = 4,
     max_seq_len: int = 4096,
-    cache_ratio: float = 0.2,
+    cache_ratio: float = 0.20,
 ) -> PreTrainedModel:
-    """Patch *model* in-place so it uses the requested KV-compression method.
+    """Patch *model* in-place for the requested KV-compression method.
+
+    Analogous to KVCache-Factory's `replace_mistral(method)` + per-layer
+    config loop.  Parameters are stored on the model so `create_cache()` can
+    reconstruct the correct cache object at inference time.
 
     Args:
-        model:        The loaded causal-LM (must be in eval mode).
-        method:       One of "full", "h2o", "streaming_llm".
-        hh_ratio:     For H2O — fraction of context kept as heavy hitters.
-        recent_ratio: For H2O — fraction of context always kept as recent.
-        sink_size:    For StreamingLLM — number of sink tokens.
-        max_seq_len:  Reference sequence length used to compute absolute sizes.
-        cache_ratio:  Overall budget as a fraction of max_seq_len (used when
-                      hh_ratio + recent_ratio == cache_ratio for consistency).
-
-    Returns:
-        The same model (possibly patched in-place).
+        model:        Loaded causal-LM in eval mode.
+        method:       "full" | "h2o" | "streaming_llm".
+        hh_ratio:     H2O heavy-hitter budget as fraction of max_seq_len.
+        recent_ratio: H2O recency window as fraction of max_seq_len.
+        sink_size:    StreamingLLM number of sink tokens.
+        max_seq_len:  Context length used to compute absolute token counts.
+        cache_ratio:  StreamingLLM total budget as fraction of max_seq_len.
     """
     method = method.lower()
 
     if method == "full":
-        logger.info("Using full-attention baseline (no compression).")
+        logger.info("Method: full attention (no compression)")
         return model
 
     if method == "h2o":
-        hh_size = max(1, int(max_seq_len * hh_ratio))
+        hh_size     = max(1, int(max_seq_len * hh_ratio))
         recent_size = max(1, int(max_seq_len * recent_ratio))
         logger.info(
-            "Applying H2O: hh_size=%d, recent_size=%d, budget=%d",
-            hh_size,
-            recent_size,
-            hh_size + recent_size,
+            "Method: H2O  |  hh=%d  recent=%d  budget=%d  (of %d)",
+            hh_size, recent_size, hh_size + recent_size, max_seq_len,
         )
-        patch_model_for_h2o(model)
-        # Store construction parameters on the model for create_cache() below.
-        model._h2o_hh_size = hh_size
+        patch_model_for_h2o(model)          # monkey-patch each attention layer
+        model._h2o_hh_size     = hh_size
         model._h2o_recent_size = recent_size
         return model
 
     if method == "streaming_llm":
         total_budget = max(sink_size + 1, int(max_seq_len * cache_ratio))
-        window_size = total_budget - sink_size
+        window_size  = total_budget - sink_size
         logger.info(
-            "Applying StreamingLLM: sink_size=%d, window_size=%d, budget=%d",
-            sink_size,
-            window_size,
-            total_budget,
+            "Method: StreamingLLM  |  sink=%d  window=%d  budget=%d  (of %d)",
+            sink_size, window_size, total_budget, max_seq_len,
         )
-        # No patching needed; the cache is constructed at inference time.
-        model._streaming_sink_size = sink_size
+        # No model patching needed — SinkCache handles eviction internally.
+        model._streaming_sink_size   = sink_size
         model._streaming_window_size = window_size
         return model
 
     raise ValueError(
-        f"Unknown method '{method}'.  Choose from: full, h2o, streaming_llm."
+        f"Unknown method '{method}'. Choose from: full, h2o, streaming_llm."
     )
 
 
 def create_cache(model: PreTrainedModel, method: str) -> Optional[object]:
-    """Instantiate the appropriate KV cache object for the active method.
+    """Create a fresh cache object for one inference request.
 
-    Call this once per inference request; do NOT reuse across requests.
+    IMPORTANT: never reuse the same cache object across requests.
 
     Returns:
-        A Cache instance for H2O / StreamingLLM, or None for full attention.
+        H2OCache, StreamingLLMCache, or None (for full attention).
     """
     method = method.lower()
 

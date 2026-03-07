@@ -1,0 +1,22 @@
+{
+  "dataset": "hotpotqa",
+  "method": "full",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 14.67,
+  "avg_latency_sec": 2.275,
+  "predictions": [
+    "Gates v. Collier",
+    "Michael Palin",
+    "Pawling, New York\n\nBased on the information provided in the passage, before joining Michigan State University, Keith Nichol played football for a school located in Paw",
+    "planet",
+    "On film."
+  ],
+  "individual_scores": [
+    33.33,
+    0.0,
+    0.0,
+    0.0,
+    40.0
+  ]
+}

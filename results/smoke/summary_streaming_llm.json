@@ -1,0 +1,18 @@
+{
+  "method": "streaming_llm",
+  "tasks": {
+    "hotpotqa": {
+      "score": 14.67,
+      "avg_latency_sec": 1.309
+    },
+    "qasper": {
+      "score": 13.3,
+      "avg_latency_sec": 2.924
+    },
+    "multifieldqa_en": {
+      "score": 21.09,
+      "avg_latency_sec": 4.302
+    }
+  },
+  "macro_avg_score": 16.35
+}

@@ -1,0 +1,22 @@
+{
+  "dataset": "qasper",
+  "method": "streaming_llm",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 13.3,
+  "avg_latency_sec": 2.924,
+  "predictions": [
+    "The ground truth for fake news is established by analyzing the public datasets of tweets that became viral during the day of the 2016 US presidential election.",
+    "The GhostVLAD approach is a pooling technique that was originally proposed for face recognition. It has been adapted to improve the performance of language identification for Indian languages. The approach involves reducing the dimensions of the data through the use of t-sne projection. The approach has been tested and proven to be effective in improving the performance of language identification.",
+    "Their model outperforms the state of the art results by 6.8%.",
+    "Additional features include the use of LSTM cells instead of GRU cells. Context includes the use of LSTM cells instead of GRU cells. Features include the use of LSTM cells instead of GRU cells. Context includes the use of LSTM cells instead of GRU cells. Features include the use of LSTM cells instead of GRU cells.",
+    "They looked at Facebook pages that were initially selected on availability and intuition. They then further grouped these pages into sets to make training data according to performance on development data and label distribution. Lastly, they could develop single models for each emotion, treating the problem as a multi-label task."
+  ],
+  "individual_scores": [
+    26.67,
+    5.41,
+    27.27,
+    7.14,
+    0.0
+  ]
+}

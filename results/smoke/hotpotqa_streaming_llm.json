@@ -1,0 +1,22 @@
+{
+  "dataset": "hotpotqa",
+  "method": "streaming_llm",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 14.67,
+  "avg_latency_sec": 1.309,
+  "predictions": [
+    "Gates v. Collier",
+    "Michael Redgrave",
+    "Pawterson",
+    "planet",
+    "On film."
+  ],
+  "individual_scores": [
+    33.33,
+    0.0,
+    0.0,
+    0.0,
+    40.0
+  ]
+}

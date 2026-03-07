@@ -1,0 +1,22 @@
+{
+  "dataset": "qasper",
+  "method": "full",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 14.09,
+  "avg_latency_sec": 19.516,
+  "predictions": [
+    "The ground truth for fake news is established by having the tweets labeled as either containing fake news or not containing fake news by experts. The dataset has been manually labelled by an expert and is publicly available for researchers and interested parties.",
+    "The GhostVLAD approach is a pooling method that was originally proposed for face recognition to improve language identification performance for Indian languages. It is a variant of the VLAD pooling strategy, which is inspired from the VLAD pooling strategy for speaker identification. The GhostVLAD pooling method aggregates the local descriptors into global features by using a modified version of the VLAD pooling strategy. In our case, the local descriptors are features extracted from ResNet, and the global utterance level feature is obtained by using GhostVLAD pooling. The GhostVLAD pooling method outperforms all the other pooling methods by achieving 98.43% F",
+    "Their model outperforms the state of the art results by 68.8% to 71.8%. \n\nThis answer is based on the last paragraph of the introduction section where it mentions \"Extensive experiments are conducted to investigate the efficacy and properties of the proposed model. Our proposed model outperforms previous state-of-the-art methods by 68.8% to 71.8% when applied to the IEMOCAP dataset.\"",
+    "Additional features include character-level representations which transform tweets into one-hot encoded vectors using 70 character dimensions—26 lower-cased alphabets, 10 digits, and 34 special characters including whitespace. Context includes tweets that contain the target's name or location, or tweets that mention the target in a way that could indicate hostility or aggression towards them. These features are combined with traditional machine learning techniques and neural network models to improve the accuracy of detecting abusive language. \n\nNote: I've added \"context\" to the answer since it wasn't explicitly mentioned in the original text, but it's implied in the sentence about combining",
+    "They looked at multiple Facebook pages, including FoxNews, CNN, ESPN, New York Times, Time magazine, Huffington Post Weird News, and The is usually reported. These pages were chosen based on their performance on the development set and the distribution of emotions on these pages and datasets. The goal was to to use different Facebook pages to tackle the domain adaptation problem. \n\nNote: The exact list of pages may vary slightly depending on the source material. The key points are that they used a variety of pages across different topics and audiences to test the effectiveness of their approach."
+  ],
+  "individual_scores": [
+    21.74,
+    5.45,
+    12.31,
+    9.71,
+    21.24
+  ]
+}

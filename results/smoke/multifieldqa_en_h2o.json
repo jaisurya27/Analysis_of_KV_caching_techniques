@@ -1,0 +1,22 @@
+{
+  "dataset": "multifieldqa_en",
+  "method": "h2o",
+  "num_samples": 5,
+  "metric": "qa_f1",
+  "score": 27.74,
+  "avg_latency_sec": 5.352,
+  "predictions": [
+    "The most active fan club is the Fans of Kotayk.",
+    "Yes, the ISR is necessary for transgene reactivation. According to the passage, the ISR is involved in the nutrient sensing pathway that triggers the activation of genes responsible for the reactivation of integrated silenced transgenes when nutrients are scarce. Specifically, the passage states \"the deprivation of essential nutrients activates the nutrient sensing pathway through",
+    "Low Temperature Scanning Tunneling Microscopy (LT-STM) was used to resolve the binding energies of the individual states.",
+    "An ICD stands for implantable cardioverter-defibrillator. It is a device that is surgically implanted in the chest to monitor heart rhythm and deliver electrical shocks to restore normal heart rhythm when needed. \n\nThe purpose of an ICD is to prevent sudden death from potentially fatal arrhythmias such as ventricular t",
+    "It is important for the sides of the fuselage to be sloped (tumbled home) because they need to fit properly within the fuselage box section. The sloping helps to create a smooth transition between the longerons and the sides, making sure that the fuselage fits correctly within the box section. Without the"
+  ],
+  "individual_scores": [
+    30.77,
+    8.0,
+    43.48,
+    23.73,
+    32.73
+  ]
+}

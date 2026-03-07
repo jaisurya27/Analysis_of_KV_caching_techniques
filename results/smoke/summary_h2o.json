@@ -1,0 +1,18 @@
+{
+  "method": "h2o",
+  "tasks": {
+    "hotpotqa": {
+      "score": 14.67,
+      "avg_latency_sec": 3.47
+    },
+    "qasper": {
+      "score": 11.05,
+      "avg_latency_sec": 9.01
+    },
+    "multifieldqa_en": {
+      "score": 27.74,
+      "avg_latency_sec": 5.352
+    }
+  },
+  "macro_avg_score": 17.82
+}

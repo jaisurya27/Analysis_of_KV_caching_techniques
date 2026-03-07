@@ -1,201 +1,320 @@
 """
-H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models
-Paper: https://arxiv.org/abs/2306.14048
-NeurIPS 2023
+H2O: Heavy-Hitter Oracle for Efficient Generative Inference
+Paper: https://arxiv.org/abs/2306.14048  (NeurIPS 2023)
 
-Algorithm:
-  During generation, a small subset of tokens ("heavy hitters") receives
-  disproportionately large accumulated attention scores.  H2O evicts the
-  lowest-scoring non-recent tokens whenever the KV cache exceeds a fixed budget
-  B = hh_size + recent_size.
+Algorithmic approach adapted from KVCache-Factory:
+  https://github.com/Zefan-Cai/KVCache-Factory/blob/main/pyramidkv/pyramidkv_utils.py
 
-  Eviction policy per layer:
-    1. Compute cumulative attention score for every cached token by summing
-       (and averaging over heads) the softmax attention weights across all
-       query positions seen so far.
-    2. Split the budget into Heavy Hitters (HH) and Recent tokens.
-       - Recent: always keep the last `recent_size` tokens unchanged.
-       - HH:     from the remaining candidates keep the top-`hh_size` by score.
-    3. Drop all other tokens from that layer's key/value cache.
+How it works
+────────────
+Every token that has ever been in the context accumulates an "importance score"
+equal to the sum of softmax attention weights it received across all query
+positions so far.  A small number of these tokens become "heavy hitters" (H²)
+— they keep attracting disproportionate attention.
 
-Implementation notes:
-  • Requires eager attention (output_attentions=True) to obtain softmax weights.
-    Use  attn_implementation="eager"  when loading the model.
-  • patch_model_for_h2o() monkey-patches every attention layer to forward
-    attention weights to the H2OCache after each forward call.
+KV eviction policy (per layer, per forward call):
+  budget = hh_size + recent_size
+  if cache_len > budget:
+      keep = top-hh_size tokens by cumulative score   (heavy hitters)
+           ∪ last recent_size tokens                  (recency window)
+      drop everything else
+
+Two-part implementation
+───────────────────────
+1. H2OKVCluster  — stateful object stored on each attention module.
+                   Holds the compressed K/V tensors and the accumulated scores.
+                   `update_kv(attn_weights, key_states, value_states)` is the
+                   main entry point called from the patched forward.
+
+2. patch_model_for_h2o(model, hh_size, recent_size)
+                 — monkey-patches every MistralAttention (or LlamaAttention)
+                   layer's `forward` so that it feeds softmax weights to the
+                   H2OKVCluster after each forward call.
+
+Requirement: attn_implementation="eager"
+  SDPA and Flash-Attention do not return softmax weight tensors even when
+  output_attentions=True, so we cannot observe which tokens are heavy hitters.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import math
+from typing import Any, List, Optional, Tuple
 
 import torch
-from transformers import Cache, DynamicCache
+import torch.nn.functional as F
+from transformers import DynamicCache
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# H2OKVCluster — per-layer state  (mirrors KVCache-Factory's H2OKVCluster)
+# ────────────────────────────────────────────────────────────────────────────
+
+class H2OKVCluster:
+    """Maintains a compressed K/V cache for a single attention layer.
+
+    The cluster is initialised empty and grows token-by-token.  Once the
+    cache exceeds `hh_size + recent_size` entries the eviction policy fires.
+
+    Args:
+        hh_size:     Maximum heavy-hitter slots to keep.
+        recent_size: Number of most-recent tokens always kept.
+    """
+
+    def __init__(self, hh_size: int, recent_size: int) -> None:
+        self.hh_size = hh_size
+        self.recent_size = recent_size
+        self.budget = hh_size + recent_size
+
+        # Running KV tensors — shape [batch, n_kv_heads, seq, head_dim]
+        self.k_cache: Optional[torch.Tensor] = None
+        self.v_cache: Optional[torch.Tensor] = None
+        # Accumulated attention scores — shape [batch, seq]
+        self.acc_scores: Optional[torch.Tensor] = None
+
+    # ------------------------------------------------------------------ #
+    #  Main entry point                                                    #
+    # ------------------------------------------------------------------ #
+
+    def update_kv(
+        self,
+        attn_weights: torch.Tensor,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Append new K/V, update scores, and evict if over budget.
+
+        Args:
+            attn_weights:  Softmax weights [batch, heads, q_len, k_len].
+            key_states:    New key   tensor [batch, heads, q_len, head_dim].
+            value_states:  New value tensor [batch, heads, q_len, head_dim].
+
+        Returns:
+            (key_cache, value_cache) after compression — to be used as the
+            effective full K/V for the current attention computation.
+        """
+        # Accumulate scores: average over heads, sum over query positions.
+        # Result: [batch, k_len]
+        new_scores = attn_weights.detach().float().mean(dim=1).sum(dim=1)
+
+        if self.k_cache is None:
+            # First call — just store everything.
+            self.k_cache = key_states
+            self.v_cache = value_states
+            self.acc_scores = new_scores
+        else:
+            # Append the new tokens to the cache.
+            self.k_cache = torch.cat([self.k_cache, key_states[:, :, -1:, :]], dim=2)
+            self.v_cache = torch.cat([self.v_cache, value_states[:, :, -1:, :]], dim=2)
+
+            # Extend the score vector for the new position(s).
+            pad_len = self.k_cache.shape[2] - self.acc_scores.shape[1]
+            if pad_len > 0:
+                self.acc_scores = F.pad(self.acc_scores, (0, pad_len))
+            self.acc_scores = self.acc_scores + new_scores
+
+            # Evict if we have grown past the budget.
+            if self.k_cache.shape[2] > self.budget:
+                self._evict()
+
+        return self.k_cache, self.v_cache
+
+    # ------------------------------------------------------------------ #
+    #  Eviction                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _evict(self) -> None:
+        """Keep top-hh_size heavy hitters + last recent_size tokens."""
+        seq_len = self.k_cache.shape[2]
+        recent_start = max(0, seq_len - self.recent_size)
+
+        # Score candidates are everything *before* the recent window.
+        n_candidates = recent_start
+        if n_candidates <= 0:
+            return
+
+        hh_scores = self.acc_scores[:, :n_candidates]   # [batch, n_cand]
+        k = min(self.hh_size, n_candidates)
+        _, top_local = hh_scores.topk(k, dim=-1, sorted=False)
+
+        # Batch dim 0 (eval always uses batch_size=1).
+        # top_idx ∈ [0, recent_start), recent_idx ∈ [recent_start, seq_len) —
+        # non-overlapping, so .unique() is unnecessary and unsafe on MPS.
+        top_idx = top_local[0].sort().values
+        recent_idx = torch.arange(recent_start, seq_len,
+                                  device=self.k_cache.device)
+        keep = torch.cat([top_idx, recent_idx])
+
+        self.k_cache = self.k_cache[:, :, keep, :]
+        self.v_cache = self.v_cache[:, :, keep, :]
+        self.acc_scores = self.acc_scores[:, keep]
+
+    def reset(self) -> None:
+        """Clear cached state (call between inference requests)."""
+        self.k_cache = None
+        self.v_cache = None
+        self.acc_scores = None
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Model patching — injects H2OKVCluster into every attention forward
+# ────────────────────────────────────────────────────────────────────────────
+
+def _make_h2o_forward(original_forward, layer_idx: int):
+    """Wrap an attention module's forward to feed weights to H2OKVCluster."""
+
+    def h2o_forward(*args, **kwargs):
+        # Always request attention weights; restore caller's preference later.
+        caller_wants_attn = kwargs.get("output_attentions", False)
+        kwargs["output_attentions"] = True
+
+        outputs = original_forward(*args, **kwargs)
+
+        # outputs ≡ (attn_output, attn_weights, past_key_value)  for eager.
+        attn_output = outputs[0]
+        attn_weights = outputs[1] if len(outputs) > 1 else None
+
+        # Resolve the cache object (keyword arg or positional arg 3).
+        # Use `is None` — not `or` — so an empty (falsy) H2OCache is not dropped.
+        past_kv = kwargs.get("past_key_value")
+        if past_kv is None:
+            past_kv = args[3] if len(args) > 3 else None
+
+        if isinstance(past_kv, H2OCache) and attn_weights is not None:
+            past_kv.record_attn_weights(attn_weights, layer_idx)
+
+        return outputs if caller_wants_attn else (attn_output, None) + outputs[2:]
+
+    return h2o_forward
 
 
 class H2OCache(DynamicCache):
-    """DynamicCache extended with H2O eviction.
+    """DynamicCache extended with per-layer H2OKVCluster eviction.
 
-    Args:
-        hh_size:     Number of heavy-hitter tokens to retain per layer.
-        recent_size: Number of most-recent tokens to always retain per layer.
+    Stores one H2OKVCluster per decoder layer.  The cluster's `update_kv`
+    is called *after* the standard cache update so that heavy-hitter scores
+    can be tracked and the cache trimmed to budget.
+
+    Note: the K/V tensors returned by `DynamicCache.update()` are the *full*
+    (growing) cache.  After that call completes, `record_attn_weights` trims
+    `self.key_cache[layer_idx]` and `self.value_cache[layer_idx]` in-place.
+    The patched forward already captured `attn_weights` from the *un-trimmed*
+    cache — that is correct behaviour: we score all tokens, *then* evict.
     """
 
     def __init__(self, hh_size: int, recent_size: int) -> None:
         super().__init__()
         self.hh_size = hh_size
         self.recent_size = recent_size
-        self.budget: int = hh_size + recent_size
-
-        # Accumulated attention scores: list indexed by layer_idx.
-        # Each element is a tensor of shape [batch, seq_len] or None.
+        self.budget = hh_size + recent_size
         self._acc_scores: List[Optional[torch.Tensor]] = []
 
-    # ------------------------------------------------------------------
-    # Public interface used by the patched attention forward
-    # ------------------------------------------------------------------
-
     def record_attn_weights(
-        self,
-        attn_weights: torch.Tensor,
-        layer_idx: int,
+        self, attn_weights: torch.Tensor, layer_idx: int
     ) -> None:
-        """Update accumulated attention scores and evict if over budget.
+        """Update accumulated importance scores and evict if over budget."""
+        # Average over heads, sum over query positions → [batch, k_len]
+        new_scores = attn_weights.detach().float().mean(dim=1).sum(dim=1)
 
-        Args:
-            attn_weights: Softmax attention weights of shape
-                          [batch, num_heads, q_len, k_len].  These cover the
-                          full cached sequence (k_len == current cache size).
-            layer_idx:    Index of the decoder layer.
-        """
-        # Average over heads, then sum over query positions → [batch, k_len]
-        layer_scores = attn_weights.detach().float().mean(dim=1).sum(dim=1)
-
-        # Grow the list if this layer hasn't been seen yet.
         while len(self._acc_scores) <= layer_idx:
             self._acc_scores.append(None)
 
         if self._acc_scores[layer_idx] is None:
-            self._acc_scores[layer_idx] = layer_scores
+            self._acc_scores[layer_idx] = new_scores
         else:
             prev = self._acc_scores[layer_idx]
-            k_len = layer_scores.size(-1)
+            k_len = new_scores.size(-1)
             prev_len = prev.size(-1)
             if k_len > prev_len:
-                # New tokens were appended; pad the accumulated scores.
-                pad = torch.zeros(
-                    prev.size(0),
-                    k_len - prev_len,
-                    device=prev.device,
-                    dtype=prev.dtype,
-                )
-                prev = torch.cat([prev, pad], dim=-1)
-                self._acc_scores[layer_idx] = prev
-            # Add new per-token votes.
-            self._acc_scores[layer_idx] = prev + layer_scores
+                prev = F.pad(prev, (0, k_len - prev_len))
+            elif k_len < prev_len:
+                prev = prev[:, :k_len]
+            self._acc_scores[layer_idx] = prev + new_scores
 
-        # Evict if the cache exceeds the budget.
         if layer_idx < len(self.key_cache):
-            seq_len = self.key_cache[layer_idx].size(-2)
-            if seq_len > self.budget:
+            if self.key_cache[layer_idx].size(-2) > self.budget:
                 self._evict_layer(layer_idx)
 
-    # ------------------------------------------------------------------
-    # Eviction
-    # ------------------------------------------------------------------
-
     def _evict_layer(self, layer_idx: int) -> None:
-        """Keep top-hh_size heavy hitters + last recent_size tokens."""
-        scores = self._acc_scores[layer_idx]  # [batch, seq_len]
         seq_len = self.key_cache[layer_idx].size(-2)
+        scores = self._acc_scores[layer_idx]           # [batch, seq]
 
-        # Indices for the "recent" window (always kept).
+        # Defensively clamp scores to actual cache length to prevent
+        # index-out-of-bounds when sizes drift (e.g. on MPS with async ops).
+        score_len = scores.size(-1)
+        if score_len > seq_len:
+            scores = scores[:, :seq_len]
+            self._acc_scores[layer_idx] = scores
+        elif score_len < seq_len:
+            scores = F.pad(scores, (0, seq_len - score_len))
+            self._acc_scores[layer_idx] = scores
+
         recent_start = max(0, seq_len - self.recent_size)
-        recent_idx = torch.arange(
-            recent_start, seq_len, device=scores.device
-        )
-
-        # Candidate heavy-hitter pool: everything before the recent window.
-        n_candidates = recent_start
-        if n_candidates <= 0:
+        if recent_start == 0:
             return
 
-        hh_scores = scores[:, :n_candidates]  # [batch, n_candidates]
+        # Compute keep indices on CPU to force MPS synchronisation.
+        # On Apple Silicon, MPS queues ops asynchronously; topk can execute
+        # on a stale buffer if we stay on-device.  Pulling scores to CPU
+        # flushes the MPS queue and guarantees correct index values.
+        # top_idx ∈ [0, recent_start), recent_idx ∈ [recent_start, seq_len) — non-overlapping.
+        device = self.key_cache[layer_idx].device
+        hh_scores_cpu = scores[:, :recent_start].cpu().float()
+        k = min(self.hh_size, recent_start)
+        _, top_local_cpu = hh_scores_cpu.topk(k, dim=-1, sorted=False)
+        top_idx = top_local_cpu[0].sort().values          # CPU, values in [0, recent_start)
+        recent_idx = torch.arange(recent_start, seq_len)  # CPU, values in [recent_start, seq_len)
+        keep = torch.cat([top_idx, recent_idx]).to(device)
 
-        # Take the top-hh_size candidates (use min in case pool is small).
-        k = min(self.hh_size, n_candidates)
-        _, top_local = hh_scores.topk(k, dim=-1, sorted=False)
-
-        # Use batch element 0 (evaluation runs with batch_size=1).
-        top_global = top_local[0].sort().values  # keep temporal order
-
-        # Merge with recent indices and deduplicate.
-        keep = torch.cat([top_global, recent_idx]).unique(sorted=True)
-
-        # Apply selection to key, value caches.
         self.key_cache[layer_idx] = self.key_cache[layer_idx][:, :, keep, :]
         self.value_cache[layer_idx] = self.value_cache[layer_idx][:, :, keep, :]
-
-        # Prune accumulated scores to match.
-        self._acc_scores[layer_idx] = self._acc_scores[layer_idx][:, keep]
+        self._acc_scores[layer_idx] = scores[:, keep]
 
 
-# ---------------------------------------------------------------------------
-# Model-level patching
-# ---------------------------------------------------------------------------
+def _make_rotary_patch(rotary_emb):
+    """Return a patched rotary_emb.forward that always serves the full cos/sin table.
 
-def _make_h2o_forward(original_forward, layer_idx: int):
-    """Return a patched attention forward that feeds weights to H2OCache."""
+    Problem: Qwen2Attention computes
+        kv_seq_len = q_len + cache.get_usable_length(...)   # = physical cache size + 1
+        cos, sin   = rotary_emb(value_states, seq_len=kv_seq_len)
+        ...
+        apply_rotary_pos_emb(q, k, cos, sin, position_ids)  # does cos[position_ids]
 
-    def h2o_forward(*args, **kwargs):
-        # Force output_attentions so we can capture the softmax weights.
-        # We'll strip them from the output if the caller didn't request them.
-        caller_wants_attn = kwargs.get("output_attentions", False)
-        kwargs["output_attentions"] = True
+    After H2O eviction the physical cache has `budget` tokens, so kv_seq_len ≈ 44.
+    But position_ids encodes the ABSOLUTE position (e.g. 86 for the 87th token).
+    cos_cached[:44][86] → index out of bounds.
 
-        outputs = original_forward(*args, **kwargs)
-
-        # outputs is a tuple whose structure depends on the attention class:
-        #   (attn_output, attn_weights, past_key_value)  — eager impl.
-        # attn_weights may be None for flash/sdpa even with output_attentions.
-        attn_output = outputs[0]
-        attn_weights = outputs[1] if len(outputs) > 1 else None
-
-        # Feed weights to the H2OCache if it is the active cache.
-        past_key_value = kwargs.get("past_key_value") or (
-            args[3] if len(args) > 3 else None
+    Fix: return the full precomputed cos_cached / sin_cached table (up to
+    max_position_embeddings, e.g. 4096 entries) so every absolute position is
+    reachable.  The attention-weight shape check uses kv_seq_len (unchanged),
+    so that validation still passes.
+    """
+    def patched_forward(x, seq_len=None):
+        if seq_len is not None and seq_len > rotary_emb.max_seq_len_cached:
+            rotary_emb._set_cos_sin_cache(
+                seq_len=seq_len, device=x.device, dtype=x.dtype
+            )
+        return (
+            rotary_emb.cos_cached.to(dtype=x.dtype),
+            rotary_emb.sin_cached.to(dtype=x.dtype),
         )
-        if (
-            isinstance(past_key_value, H2OCache)
-            and attn_weights is not None
-        ):
-            past_key_value.record_attn_weights(attn_weights, layer_idx)
-
-        if caller_wants_attn:
-            return outputs
-        # Drop attention weights from output tuple.
-        return (attn_output,) + outputs[2:]
-
-    return h2o_forward
+    return patched_forward
 
 
 def patch_model_for_h2o(model: Any) -> Any:
-    """Monkey-patch every attention layer in *model* for H2O compatibility.
+    """Monkey-patch every attention layer in *model* for H2O.
 
-    This must be called **before** inference so that each attention forward
-    passes its softmax weights to the H2OCache.
+    Works for Mistral and Llama family models (both use `model.model.layers`
+    with a `.self_attn` sub-module).
 
-    Args:
-        model: A HuggingFace causal-LM (e.g. Qwen3ForCausalLM).
-
-    Returns:
-        The same model object (patched in-place).
+    Must be called **once** before inference.  The model object is patched
+    in-place and the same object is returned.
     """
-    decoder_layers = model.model.layers  # works for Llama / Qwen3 topology
-
-    for layer_idx, layer in enumerate(decoder_layers):
+    for layer_idx, layer in enumerate(model.model.layers):
         attn = layer.self_attn
-        original_fwd = attn.forward
-        attn.forward = _make_h2o_forward(original_fwd, layer_idx)
-
+        if getattr(attn, "_h2o_patched", False):
+            continue  # already wrapped — skip to keep patches idempotent
+        attn.forward = _make_h2o_forward(attn.forward, layer_idx)
+        attn.rotary_emb.forward = _make_rotary_patch(attn.rotary_emb)
+        attn._h2o_patched = True
     return model

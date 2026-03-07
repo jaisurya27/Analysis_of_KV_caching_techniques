@@ -1,0 +1,18 @@
+{
+  "method": "full",
+  "tasks": {
+    "hotpotqa": {
+      "score": 14.67,
+      "avg_latency_sec": 2.275
+    },
+    "qasper": {
+      "score": 14.09,
+      "avg_latency_sec": 19.516
+    },
+    "multifieldqa_en": {
+      "score": 29.99,
+      "avg_latency_sec": 13.187
+    }
+  },
+  "macro_avg_score": 19.58
+}
