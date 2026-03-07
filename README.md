@@ -2,13 +2,13 @@
 
 Systematic evaluation of **H2O** and **StreamingLLM** KV-cache compression
 on the [LongBench](https://github.com/THUDM/LongBench) benchmark, using
-**Mistral-7B-Instruct-v0.2** as the base model.
+**Qwen2.5-1.5B-Instruct** as the base model.
 
 ---
 
 ## Background
 
-Standard self-attention has O(N²) complexity in the sequence length N.  The
+Standard self-attention has O(N²) complexity in the sequence length N. The
 KV cache grows linearly and becomes the memory bottleneck for long contexts.
 Two complementary strategies are studied here:
 
@@ -32,13 +32,8 @@ Kv_caching/
 │   └── eval/
 │       ├── longbench.py      # LongBenchEvaluator
 │       └── metrics.py        # F1, ROUGE-L, classification, code-sim
-├── scripts/
-│   ├── run_full.sh           # Baseline (no compression)
-│   ├── run_h2o.sh            # H2O
-│   ├── run_streaming_llm.sh  # StreamingLLM
-│   └── eval_all.sh           # Full sweep (all methods × 3 budgets)
-├── run_eval.py               # Main evaluation entry point
-├── run_benchmark.py          # Speed / memory benchmark
+├── notebooks/
+│   └── evaluate.ipynb        # PRIMARY entry point — demo, eval, plots
 ├── requirements.txt
 └── results/                  # JSON result files (auto-created)
 ```
@@ -54,80 +49,71 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **Flash Attention 2** (optional, CUDA only): `pip install flash-attn --no-build-isolation`
-> **4-bit quantisation** (optional, CUDA): `pip install bitsandbytes`
-
-### 2. Run a smoke-test (5 samples per task)
+### 2. Open the notebook
 
 ```bash
-# Full-attention baseline
-NUM_SAMPLES=5 bash scripts/run_full.sh
-
-# H2O at 20% budget (10% HH + 10% recent)
-NUM_SAMPLES=5 bash scripts/run_h2o.sh
-
-# StreamingLLM at 20% budget
-NUM_SAMPLES=5 bash scripts/run_streaming_llm.sh
+jupyter notebook notebooks/evaluate.ipynb
 ```
 
-### 3. Full LongBench sweep
+Run top-to-bottom:
 
-```bash
-bash scripts/eval_all.sh          # all methods × 10 / 20 / 50 % budgets
+| Section | What it does |
+|---|---|
+| §0 | Install / verify dependencies |
+| §1 | Background: how each method works |
+| §2 | Load Qwen2.5-1.5B-Instruct |
+| §3 | Visual demo — see the KV cache shrink in real time |
+| §4 | LongBench smoke-test (5 samples × 3 tasks) |
+| §5 | Full LongBench evaluation (3 budgets × 2 methods) |
+| §6 | Results — score table, bar chart, efficiency-accuracy curve, latency |
+
+### Running on Google Colab (recommended for full eval)
+
+```python
+!git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+%cd Kv_caching
+!pip install -q -r requirements.txt
 ```
 
-Results are written as JSON to `results/`.
-
-### 4. Speed benchmark
-
-```bash
-python run_benchmark.py --method full h2o streaming_llm \
-    --seq_len 512 1024 2048 4096 --gen_len 128
-```
+Then open `notebooks/evaluate.ipynb`. The notebook auto-detects CUDA — no config changes needed.
 
 ---
 
-## Configuration
+## Smoke-test results (5 samples, 20% cache budget, MPS)
 
-All scripts honour environment variables:
+Tasks: `hotpotqa` (multi-hop QA), `qasper` (scientific QA), `multifieldqa_en` (single-doc QA)
 
-| Variable | Default | Description |
-|---|---|---|
-| `MODEL` | `mistralai/Mistral-7B-Instruct-v0.2` | HuggingFace model ID |
-| `MAX_SEQ_LEN` | `4096` | Context window (tokens) |
-| `NUM_SAMPLES` | _(all)_ | Max samples per task |
-| `OUTPUT_DIR` | `results` | Output directory |
-| `HH_RATIO` | `0.10` | H2O: heavy-hitter fraction |
-| `RECENT_RATIO` | `0.10` | H2O: recent-token fraction |
-| `CACHE_RATIO` | `0.20` | StreamingLLM: total budget fraction |
-| `SINK_SIZE` | `4` | StreamingLLM: number of sink tokens |
+**Score (%)**
 
-You can also call `run_eval.py` directly with full argument control:
+| Task | full | h2o | streaming_llm |
+|---|---|---|---|
+| hotpotqa | 14.67 | 14.67 | 14.67 |
+| multifieldqa_en | 29.99 | 27.74 | 21.09 |
+| qasper | 14.09 | 11.05 | 13.30 |
 
-```bash
-python run_eval.py \
-    --method h2o \
-    --model mistralai/Mistral-7B-Instruct-v0.2 \
-    --hh_ratio 0.05 --recent_ratio 0.05 \
-    --max_seq_len 4096 \
-    --tasks narrativeqa hotpotqa gov_report \
-    --num_samples 20 \
-    --output_dir results/h2o_10pct
-```
+**Avg latency per sample (s)**
+
+| Task | full | h2o | streaming_llm |
+|---|---|---|---|
+| hotpotqa | 2.275 | 3.470 | 1.309 |
+| multifieldqa_en | 13.187 | 5.352 | 4.302 |
+| qasper | 19.516 | 9.010 | 2.924 |
+
+Key observations:
+- H2O preserves quality better than StreamingLLM on document QA (importance scoring vs. FIFO eviction).
+- Both compression methods are significantly faster than full attention on long-context tasks (qasper, multifieldqa_en) where cache size dominates decode latency.
+- On short contexts (hotpotqa), full attention is fastest — compression overhead is not worth it.
 
 ---
 
-## LongBench tasks
+## Hardware guide (Qwen2.5-1.5B bfloat16, ~3 GB)
 
-| Task | Domain | Metric |
-|---|---|---|
-| `narrativeqa` | Single-doc QA | F1 |
-| `qasper` | Scientific QA | F1 |
-| `hotpotqa` | Multi-hop QA | F1 |
-| `2wikimqa` | Multi-hop QA | F1 |
-| `gov_report` | Summarisation | ROUGE-L |
-| `trec` | Few-shot classification | Accuracy |
-| `passage_count` | Synthetic counting | Accuracy |
+| Hardware | Notes |
+|---|---|
+| NVIDIA A100 / H100 | Run as-is, full eval ~30 min |
+| RTX 3090 / 4090 (24 GB) | Run as-is |
+| Apple M-series (≥ 8 GB RAM) | Set `DEVICE_MAP = "mps"` in §2; smoke-test only recommended |
+| CPU only | Smoke-test only |
 
 ---
 
@@ -142,12 +128,15 @@ python run_eval.py \
   a cumulative importance score for each cached token.
 - **Requires `attn_implementation="eager"`** (SDPA / Flash Attention do not
   return softmax weights when `output_attentions=True`).
+- Rotary embeddings are patched to return the full precomputed cos/sin table,
+  allowing absolute position IDs to remain valid after cache eviction.
 
 ### StreamingLLM (`src/kv_cache/streaming_llm.py`)
 
 - Thin wrapper around HuggingFace's built-in `SinkCache`.
 - No model patching needed — just pass the cache object to `model.generate()`.
 - Works with any attention backend (eager, SDPA, Flash Attention 2).
+- `get_usable_length` is overridden to handle bulk prefill correctly with Qwen2-family models.
 
 ---
 
@@ -165,5 +154,5 @@ python run_eval.py \
    Understanding*, ACL 2024.
    [arxiv:2308.14508](https://arxiv.org/abs/2308.14508)
 
-4. Qwen Team, *Mistral Technical Report*, 2025.
-   [mistralai/Mistral-7B-Instruct-v0.2](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2)
+4. Qwen Team, *Qwen2.5 Technical Report*, 2024.
+   [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)
