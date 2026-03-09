@@ -165,7 +165,9 @@ def create_cache(model: PreTrainedModel, method: str) -> Optional[object]:
     Returns:
         H2OCache, StreamingLLMCache, or None (for full attention).
     """
-    method = method.lower()
+    # Strip budget tag suffix (e.g. "h2o_10pct" → "h2o", "streaming_llm_20pct" → "streaming_llm")
+    import re
+    method = re.sub(r"_\d+pct$", "", method.lower())
 
     if method == "full":
         return None
