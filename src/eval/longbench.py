@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -28,6 +30,54 @@ from src.eval.metrics import DATASET_TO_METRIC, compute_metric
 from src.models.patch import create_cache
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# LongBench data download helper
+# ---------------------------------------------------------------------------
+
+_LONGBENCH_ZIP_URL = (
+    "https://huggingface.co/datasets/THUDM/LongBench/resolve/main/data.zip"
+)
+_LONGBENCH_CACHE_DIR = Path.home() / ".cache" / "longbench_data"
+
+
+def _ensure_longbench_data(cache_dir: Path = _LONGBENCH_CACHE_DIR) -> Path:
+    """Download and extract LongBench data.zip on first use.
+
+    The THUDM/LongBench HF repo no longer supports script-based loading
+    (datasets >= 3.0) and stores all task JSONL files inside a single
+    data.zip archive.  This helper downloads the zip once (~114 MB) and
+    extracts it to *cache_dir*, then returns the directory containing
+    the *.jsonl files.
+    """
+    # Check if already extracted (any .jsonl present at root or in data/)
+    for search_dir in [cache_dir, cache_dir / "data"]:
+        if search_dir.exists() and any(search_dir.glob("*.jsonl")):
+            logger.info("LongBench data already cached at %s", search_dir)
+            return search_dir
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = cache_dir / "data.zip"
+
+    logger.info("Downloading LongBench data.zip (~114 MB) …")
+    print("Downloading LongBench data.zip (~114 MB) — one-time download …")
+    urllib.request.urlretrieve(_LONGBENCH_ZIP_URL, zip_path)
+
+    logger.info("Extracting data.zip to %s …", cache_dir)
+    print(f"Extracting to {cache_dir} …")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(cache_dir)
+    zip_path.unlink()  # remove zip after extraction
+
+    # Return whichever directory actually contains the jsonl files
+    for search_dir in [cache_dir, cache_dir / "data"]:
+        if search_dir.exists() and any(search_dir.glob("*.jsonl")):
+            return search_dir
+
+    raise FileNotFoundError(
+        f"Extraction succeeded but no *.jsonl files found under {cache_dir}. "
+        "Check the zip structure manually."
+    )
 
 # ---------------------------------------------------------------------------
 # Task prompt templates (same as original LongBench)
@@ -196,6 +246,7 @@ class LongBenchEvaluator:
         tasks: List[str] = DEFAULT_TASKS,
         max_length: int = 3800,
         num_samples: Optional[int] = None,
+        max_new_tokens: Optional[int] = None,
         output_dir: str = "results",
         device: str = "cuda",
     ) -> None:
@@ -205,6 +256,7 @@ class LongBenchEvaluator:
         self.tasks = tasks
         self.max_length = max_length
         self.num_samples = num_samples
+        self.max_new_tokens = max_new_tokens  # overrides per-task defaults if set
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.device = device
@@ -247,11 +299,18 @@ class LongBenchEvaluator:
         """Evaluate a single LongBench task; return a result dict."""
         logger.info("Loading LongBench task: %s", dataset)
 
-        raw = load_dataset("THUDM/LongBench", dataset, split="test")
+        data_dir = _ensure_longbench_data()
+        jsonl_path = data_dir / f"{dataset}.jsonl"
+        if not jsonl_path.exists():
+            raise FileNotFoundError(
+                f"Task file not found: {jsonl_path}\n"
+                f"Available files: {sorted(data_dir.glob('*.jsonl'))}"
+            )
+        raw = load_dataset("json", data_files=str(jsonl_path), split="train")
         if self.num_samples is not None:
             raw = raw.select(range(min(self.num_samples, len(raw))))
 
-        max_new = MAX_NEW_TOKENS.get(dataset, 128)
+        max_new = self.max_new_tokens if self.max_new_tokens is not None else MAX_NEW_TOKENS.get(dataset, 128)
         scores, predictions, timings = [], [], []
 
         for example in tqdm(raw, desc=f"{dataset} [{self.method}]"):
