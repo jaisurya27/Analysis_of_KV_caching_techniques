@@ -86,7 +86,7 @@ class H2OKVCluster:
 
         Args:
             attn_weights:  Softmax weights [batch, heads, q_len, k_len].
-            key_states:    New key   tensor [batch, heads, q_len, head_dim].
+            key_states:    New key tensor [batch, heads, q_len, head_dim].
             value_states:  New value tensor [batch, heads, q_len, head_dim].
 
         Returns:
